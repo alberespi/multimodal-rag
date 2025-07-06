@@ -1,0 +1,20 @@
+name: multimodal-rag
+channels:
+  - conda-forge
+  - pytorch
+dependencies:
+  - python =3.11
+  - pip
+  - faiss-cpu
+  - pdf2image
+  - pypdf
+  - pytesseract
+  - poppler
+  - ffmpeg
+  - yt-dlp
+  - streamlit
+  - pip:
+      - open_clip_torch
+      - openai-whisper  # Use official OpenAI Whisper instead of whisper-cpp-python
+      - llama-cpp-python
+      - ragas  # Remove [metrics] extra which doesn't exist
