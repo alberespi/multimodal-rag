@@ -44,9 +44,9 @@ multimodal-rag/
 
 ```mermaid
 flowchart TD
-    U[User question] -->|CLIP embed| F(FAISS Index)
-    F --> C{Top-k context}
-    C -->|prompt| L[LLM (Llama-3 8B)]
+    U[User question] -->|CLIP embed| F[FAISS Index]
+    F --> C[Top-k context]
+    C -->|prompt| L[LLM – Llama-3 8B]
     L --> A[Answer + slide/timecode]
 ```
 
