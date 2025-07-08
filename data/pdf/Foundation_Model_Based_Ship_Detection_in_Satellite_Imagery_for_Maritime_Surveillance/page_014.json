@@ -1,0 +1,6 @@
+{
+  "source": "Foundation_Model_Based_Ship_Detection_in_Satellite_Imagery_for_Maritime_Surveillance.pdf",
+  "page": 14,
+  "text": "x LIST OF FIGURES\n4.6 Qualitative segmentation examples for the fine-tuned BCE + IoU model.\nEach strip displays the masked RGB input, ground-truth mask, and\nmodel prediction (left − →right). From early to late epochs the network\neliminates most false positives and recovers small vessels, converging to\nthe behavior quantified in Table 4.2. . . . . . . . . . . . . . . . . . . . 39\n5.1 Typical failure modes on held-out validation patches. Each triplet dis-\nplays, from left to right, the RGB input, ground-truth mask, and model\nprediction. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46",
+  "image": "page_014.png"
+}

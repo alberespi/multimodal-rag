@@ -1,0 +1,6 @@
+{
+  "source": "Foundation_Model_Based_Ship_Detection_in_Satellite_Imagery_for_Maritime_Surveillance.pdf",
+  "page": 45,
+  "text": "3.5. IMPLEMENTATION DETAILS 29\neach pretraining epoch taking about 5–6 minutes and each fine-tuning epoch around\n1–2 minutes, making the experimentation feasible.",
+  "image": "page_045.png"
+}

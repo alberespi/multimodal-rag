@@ -1,0 +1,6 @@
+{
+  "source": "Foundation_Model_Based_Ship_Detection_in_Satellite_Imagery_for_Maritime_Surveillance.pdf",
+  "page": 51,
+  "text": "4.2. FINE-TUNING FOR SHIP DETECTION 35\n(a) BCELoss examples\n (b) MSELoss – sea &\ncoastline\n(c) MSELoss – sea & vessel\n (d) MSELoss – urban\npatterns\nFigure 4.3: Qualitative reconstruction results on held-out validation patches. Each\nmontage shows, from left to right, the masked input, the original patch, and the model\nreconstruction. (a) BCELoss examples illustrate the limited fidelity obtained with a\nbinary-oriented objective. (b) MSELoss – sea & coastline: rows 1 and 5 depict shoreline\nfragments, while rows 2–4 show open ocean. (c) MSELoss – sea & vessel: row 1 contains\na small bright vessel; rows 2–5 are homogeneous sea surface. (d) MSELoss – urban\npatterns & mixed scenes: row 3 highlights a regular grid of coastal buildings, and row 4\na bright shoreline road network. Overall, MSELoss achieves markedly superior spatial\nand spectral reconstruction across a variety of scenarios.",
+  "image": "page_051.png"
+}

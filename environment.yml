@@ -13,6 +13,8 @@ dependencies:
   - ffmpeg
   - yt-dlp
   - streamlit
+  - protobuf<5
+  - langdetect
   - pip:
       - open_clip_torch
       - openai-whisper  # Use official OpenAI Whisper instead of whisper-cpp-python
