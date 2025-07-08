@@ -1,6 +1,0 @@
-{
-  "source": "Foundation_Model_Based_Ship_Detection_in_Satellite_Imagery_for_Maritime_Surveillance.pdf",
-  "page": 63,
-  "text": "5.4. SUMMARY OF FINDINGS 47\n3. Error modes are predictable and actionable.Systematic over -segmentation,\nwake confusion and missed micro-boats stem from class imbalance, a fixed match-\ning threshold and limited data diversity – factors that can be mitigated with\nbalanced losses, synthetic augmentation and domain expansion.\n4. Operational viability. Batch inference processes∼16 six-band patches every 50\nms on a single NVIDIA A40. Although full-scene timings are still to be profiled,\nthis throughput indicates that end-to-end analysis of PlanetScope strips remains\nwithin the near-real-time budget of the MARVISION pipeline.\nThese findings set the stage for Chapter 6, where we translate the technical results\ninto strategic recommendations for a production-ready maritime-surveillance service.",
-  "image": "page_063.png"
-}
