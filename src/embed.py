@@ -20,7 +20,14 @@ def _lazy_load(model_name="ViT-L-14", weights='openai'):
     if _MODEL is not None:
         return # Already loaded
     
-    _MODEL, _PREPROCESS, _ = create_model_from_pretrained(model_name, weights)
+    ret = create_model_from_pretrained(model_name, weights)
+    if len(ret) == 3:
+        _MODEL, _PREPROCESS, _ = ret # Older API version
+    elif len(ret) == 2:
+        _MODEL, _PREPROCESS = ret
+    else:
+        raise RuntimeError("Unexpected return from create_model_from_pretrained")
+    
     _MODEL.eval().to(_DEVICE) # Inference mode
 
 # --------------- L2 Normalization --------------------------

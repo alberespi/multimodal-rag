@@ -1,6 +1,6 @@
 from pathlib import Path
 import json, torch, argparse
-from typing import List, Dict
+from typing import List, Dict, Any
 from PIL import Image
 from tqdm import tqdm
 
@@ -30,4 +30,32 @@ def embed_directory(indir: Path, outfile: Path, *, batch_size: int = 32) -> None
     if not meta_files:
         raise ValueError(f"No JSON files found in {indir}")
     
-    texts, images, metas: List[str] | List[Image.Image] | List[Dict] = [], [], []
+    texts:  List[str]            = []
+    images: List[Image.Image]    = []
+    metas:  List[Dict[str, Any]] = []
+
+    for mp in tqdm(meta_files, desc="Reading pages"):
+        meta = json.loads(mp.read_text())
+        img = Image.open(indir / meta["image"]).convert("RGB")
+        texts.append(meta["text"])
+        images.append(img)
+        metas.append(meta)
+    
+    vec_text = embed_text(texts, batch_size=batch_size)         # N x 768
+    vec_image = embed_images(images, batch_size=batch_size//2)  # N x 768
+    vecs = torch.cat([vec_text, vec_image], dim=1)              # N x 1536
+
+    outfile.parent.mkdir(parents=True, exist_ok=True)
+    payload = torch.save({"vecs": vecs, "meta": metas}, outfile)
+    print(f"Saved {vecs.shape[0]} embeddings to {outfile}")
+
+    return payload
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="batch-embed to PDF directory")
+    parser.add_argument("indir", type=Path, help="Folder with page_*.json/png")
+    parser.add_argument("outfile", type=Path, help="Output .pt file")
+    parser.add_argument("--batch", type=int, default=32, help="Text batch size (default 32, images use batch/2)")
+    args = parser.parse_args()
+
+    embed_directory(args.indir, args.outfile, batch_size=args.batch)
