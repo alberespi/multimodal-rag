@@ -1,36 +1,29 @@
-"""Thin wrapper around a FAISS index plus SQLite metastore."""
+import faiss, sqlite3, json, numpy as np, torch
 from pathlib import Path
-from typing import Sequence, Dict, Any
-import faiss, sqlite3, torch
+from typing import List, Dict, Any
 
 class VectorStore:
     def __init__(self, dim: int, index_path: Path, meta_path: Path):
         self.dim = dim
-        self.index = faiss.IndexFlatIP(dim)  # cosine via inner-product on normalised vecs
-        self.index_path = index_path
-        self.db = sqlite3.connect(meta_path)
-        self._init_meta()
+        self.index_path = Path(index_path)
+        self.db = sqlite3.connect(str(meta_path))
+        self._init_meta_table()
 
-    def _init_meta(self):
+        if index_path.exists():
+            self.index = faiss.read_index(str(index_path))
+            assert self.index.d == dim, "dim mismatch"
+        else:
+            self.index = faiss.IndexFlatIP(dim)
+
+    def _init_meta_table(self) -> None:
         cur = self.db.cursor()
-        cur.execute(
-            """CREATE TABLE IF NOT EXISTS meta (
-                   id INTEGER PRIMARY KEY,
-                   source TEXT,
-                   location TEXT,
-                   text TEXT
-               )"""
-        )
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS meta (
+                        id INTEGER PRIMARY KEY,
+                    source TEXT,
+                    page INTEGER,
+                    payload TEXT
+                    )
+                """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_source ON meta(source)")
         self.db.commit()
-
-    def add(self, vecs: torch.Tensor, metas: Sequence[Dict[str, Any]]):
-        self.index.add(vecs.numpy())
-        cur = self.db.cursor()
-        for m in metas:
-            cur.execute(
-                "INSERT INTO meta (source, location, text) VALUES (:source, :location, :text)",
-                m,
-            )
-        self.db.commit()
-
-    # TODO: save/load, search
