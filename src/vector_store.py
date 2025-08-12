@@ -30,32 +30,78 @@ class VectorStore:
 
     def add(self, vecs: torch.Tensor | np.ndarray, metas: List[Dict[str, Any]]) -> List[int]:
         assert len(metas) == len(vecs), "vecs/metas length mismatch"
-        if isinstance(vecs, torch.Tensor):
-            vecs = vecs.detach().cpu().to(torch.float32).numpy()
-        else:
-            vecs = vecs.astype("float32", copy=False)
-        assert vecs.shape[1] == self.dim
 
-        faiss.normalize_L2(vecs)
-        start = self.index.ntotal
-        n = vecs.shape[0]
-        ids = list(range(start, start + n))
-        self.index.add(vecs)
+        # ---- 1) Load existing keys from SQLite ----
+        cur = self.db.cursor()
+        cur.execute("SELECT payload FROM meta")
+        existing_keys = set()
+        for (payload,) in cur.fetchall():
+            try:
+                m = json.loads(payload)
+                key = (
+                    m.get("source"),
+                    int(m.get("page", -1)),
+                    m.get("sha_image"),   # can be None if there was no one
+                    m.get("sha_text"),
+                )
+            except Exception:
+                continue
+            existing_keys.add(key)
 
-        rows = []
+        # ---- 2) Filter what element are actually new ----
+        keep_idx = []
+        new_metas = []
         for i, m in enumerate(metas):
-            rid = start + i
+            key = (
+                m.get("source"),
+                int(m.get("page", -1)),
+                m.get("sha_image"),
+                m.get("sha_text"),
+            )
+            # Fallback just inca se the meta have no hashes
+            if key[2] is None and key[3] is None:
+                key = (m.get("source"), int(m.get("page", -1)), None, None)
+
+            if key in existing_keys:
+                continue
+            existing_keys.add(key)
+            keep_idx.append(i)
+            new_metas.append(m)
+
+        if not keep_idx:
+            return []  # there is no new elements to add
+
+        # ---- 3) Prepare vectors (just the new ones) ----
+        if isinstance(vecs, torch.Tensor):
+            vecs_np = vecs.detach().cpu().to(torch.float32).numpy()[keep_idx]
+        else:
+            vecs_np = vecs.astype("float32", copy=False)[keep_idx]
+
+        assert vecs_np.shape[1] == self.dim
+        faiss.normalize_L2(vecs_np)
+
+        # ---- 4) Add to FAISS with implicit ids (start..start+n-1) ----
+        start = self.index.ntotal
+        n = vecs_np.shape[0]
+        ids = list(range(start, start + n))
+        self.index.add(vecs_np)
+
+        # ---- 5) Insert alinged metadata with those ids ----
+        rows = []
+        for off, m in enumerate(new_metas):
+            rid = start + off
             src = m.get("source")
             page = int(m.get("page", -1))
             payload = json.dumps(m, ensure_ascii=False)
             rows.append((rid, src, page, payload))
-        cur = self.db.cursor()
+
         cur.executemany(
             "INSERT OR REPLACE INTO meta (id, source, page, payload) VALUES (?, ?, ?, ?)",
             rows,
         )
         self.db.commit()
         return ids
+
 
     def _fetch_meta_by_ids(self, ids: List[int]) -> Dict[int, Dict[str, Any]]:
         ids = [int(i) for i in ids if i is not None and i >= 0]
@@ -92,6 +138,17 @@ class VectorStore:
                 })
             results.append(hits)
         return results
+    
+    def stats(self) -> dict:
+        n_faiss = self.index.ntotal
+        n_sql = self.db.execute("SELECT COUNT(*) FROM meta").fetchone()[0]
+        return {"faiss": int(n_faiss), "sqlite": int(n_sql), "dim": int(self.index.d)}
+
+    def reset(self):
+        # just closes; to delete files, outside (more explicit)
+        if self.index_path.exists(): self.index_path.unlink()
+        # the sqlite is deleted deleting the file outside
+
 
     def save(self) -> None:
         faiss.write_index(self.index, str(self.index_path))
