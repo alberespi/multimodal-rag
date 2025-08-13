@@ -3,8 +3,8 @@ from typing import Optional, TypedDict, List
 import torch
 from PIL import Image
 
-from embed import embed_text, embed_images
-from vector_store import VectorStore
+from src.embed import embed_text, embed_images
+from src.vector_store import VectorStore
 
 class Hit(TypedDict):
     id: int

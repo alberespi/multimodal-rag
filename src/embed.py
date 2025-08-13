@@ -1,7 +1,7 @@
 import torch
 from PIL import Image
 from open_clip import create_model_from_pretrained, tokenize
-from utils.device import get_device
+from src.utils.device import get_device
 
 # -------- GLOBAL VARIABLES --------------
 _DEVICE = get_device()  # 'cuda' / 'mps' / 'cpu'

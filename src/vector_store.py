@@ -1,12 +1,15 @@
 import faiss, sqlite3, json, numpy as np, torch
 from pathlib import Path
 from typing import List, Dict, Any
+import threading
 
 class VectorStore:
     def __init__(self, dim: int, index_path: Path, meta_path: Path):
+        self._lock = threading.RLock()
         self.dim = dim
         self.index_path = Path(index_path)
-        self.db = sqlite3.connect(str(meta_path))
+        self.db = sqlite3.connect(str(meta_path), check_same_thread=False)
+        self.db.row_factory = sqlite3.Row  # (optional) dict type rows
         self._init_meta_table()
 
         if self.index_path.exists():
@@ -16,17 +19,18 @@ class VectorStore:
             self.index = faiss.IndexFlatIP(dim)
 
     def _init_meta_table(self) -> None:
-        cur = self.db.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS meta (
-              id INTEGER PRIMARY KEY,
-              source TEXT,
-              page INTEGER,
-              payload TEXT
-            )
-        """)
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_source ON meta(source)")
-        self.db.commit()
+        with self._lock:
+            cur = self.db.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS meta (
+                  id INTEGER PRIMARY KEY,
+                  source TEXT,
+                  page INTEGER,
+                  payload TEXT
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_source ON meta(source)")
+            self.db.commit()
 
     def add(self, vecs: torch.Tensor | np.ndarray, metas: List[Dict[str, Any]]) -> List[int]:
         assert len(metas) == len(vecs), "vecs/metas length mismatch"
@@ -108,11 +112,14 @@ class VectorStore:
         if not ids:
             return {}
         qmarks = ",".join("?" for _ in ids)
-        cur = self.db.cursor()
-        cur.execute(f"SELECT id, payload FROM meta WHERE id IN ({qmarks})", ids)
-        out: Dict[int, Dict[str, Any]] = {}
-        for rid, payload in cur.fetchall():
-            out[int(rid)] = json.loads(payload)
+        with self._lock:
+            cur = self.db.cursor()
+            cur.execute(f"SELECT id, payload FROM meta WHERE id IN ({qmarks})", ids)
+            rows = cur.fetchall()
+
+        out = {int(r["id"] if isinstance(r, sqlite3.Row) else r[0]):
+           json.loads(r["payload"] if isinstance(r, sqlite3.Row) else r[1])
+           for r in rows}
         return out
 
     def search(self, query_vecs: torch.Tensor | np.ndarray, k: int = 5):
@@ -152,7 +159,8 @@ class VectorStore:
 
     def save(self) -> None:
         faiss.write_index(self.index, str(self.index_path))
-        self.db.commit()
+        with self._lock:
+            self.db.commit()
 
     def close(self) -> None:
         self.db.commit()
