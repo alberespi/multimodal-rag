@@ -9,6 +9,7 @@ from src.ingest_pdf import ingest_pdf
 from src. embed_batch import embed_directory
 from src.vector_store import VectorStore
 from src.retrieve import init_store, retrieve
+from src.generate import answer_question, GenConfig
 
 warnings.filterwarnings(
     "ignore",
@@ -18,11 +19,33 @@ warnings.filterwarnings(
 st.set_page_config(page_title="Multimodal RAG · PDF search", layout="wide")
 st.title("🔎 Multimodal RAG – PDF search (MVP)")
 
+# ---- Session state ----
+if "hits" not in st.session_state:
+    st.session_state.hits = []
+if "last_answer" not in st.session_state:
+    st.session_state.last_answer = None
+if "last_used" not in st.session_state:
+    st.session_state.last_used = []   # sources used by the LLM
+if "last_question" not in st.session_state:
+    st.session_state.last_question = ""
+
+
 # ---------- Sidebar: paths and options ----------
 st.sidebar.header("Index")
 index_path = Path(st.sidebar.text_input("FAISS index", "data/faiss.index"))
 meta_path = Path(st.sidebar.text_input("SQLite meta", "data/faiss.sqlite"))
 k = st.sidebar.slider("Top-K", 1, 10, 3)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Answer generation")
+model_name = st.sidebar.selectbox(
+    "LLM model",
+    ["llama3:8b", "gpt-oss:20b"],
+    index=0
+)
+temp = st.sidebar.slider("Temperature", 0.0, 1.0, 0.2, 0.1)
+max_tokens = st.sidebar.number_input("Max tokens", 64, 2048, 300, 32)
+
 
 with st.sidebar.expander("Advanced (Optional)"):
     base_pdf_dir = Path(st.text_input("Base of PDFs (to find images)", "data/pdf"))
@@ -128,14 +151,6 @@ def resolve_image_path(hit_image: str, hit_source: str) -> Path | None:
         return p
     return None
 
-# Question field
-question = st.text_input("Write your question...", placeholder="e.g. what is this page about?")
-
-col_run, col_clear = st.columns([1, 1])
-do_search = col_run.button("Search")
-if col_clear.button("Clean results"):
-    st.rerun()
-
 # Optional image for the query
 query_image = None
 if use_img_query and uploaded is not None:
@@ -145,30 +160,82 @@ if use_img_query and uploaded is not None:
     except Exception as e:
         st.warning(f"Could not open the uploaded image: {e}")
 
-# ---------- Execute query ----------
+
+# -------------- Execute query & show results --------------
+
+# Campo de búsqueda (usa el último valor si existe)
+question = st.text_input(
+    "Write your question...",
+    value=st.session_state.last_question,
+    placeholder="e.g., azúcares añadidos y etiquetas",
+)
+
+col_run, col_clear = st.columns([1, 1])
+do_search = col_run.button("Search")
+if col_clear.button("Clean results"):
+    st.session_state.hits = []
+    st.session_state.last_answer = None
+    st.session_state.last_used = []
+    st.session_state.last_question = ""
+    st.experimental_rerun()
+
+# Si se pulsa Search, ejecuta retrieve y guarda EN SESIÓN
 if do_search and question.strip():
-    with st.spinner("Searching..."):
+    with st.spinner("Searching ..."):
         hits = retrieve(question, k=k, image=query_image, alpha=alpha)
-    
-    if not hits:
-        st.info("No results.")
-    else:
-        for i, h in enumerate(hits, start=1):
-            with st.container(border=True):
-                cols = st.columns([1, 2])
-                # Image of the page (if we found it)
-                img_path = resolve_image_path(h["image"], h["source"])
-                if img_path and img_path.exists():
-                    cols[0].image(str(img_path), caption=f"Page {h['page']}")
-                else:
-                    cols[0].write("❓ Could not find the image in disk.")
-                
-                # Text + meta
-                cols[1].markdown(
-                    f"**#{i}** · **Score:** {h['score']:.3f}  ·  "
-                    f"**Source:** {h['source']}  ·  **Page:** {h['page']}"
-                )
-                snippet = (h['text'] or "").strip().replace("\n", " ")
-                cols[1].write(snippet[:600] + ("..." if len(snippet) > 600 else ""))
-else:
+    st.session_state.hits = hits
+    st.session_state.last_question = question
+
+# A partir de aquí, SIEMPRE leemos hits desde sesión
+hits = st.session_state.hits
+
+# Si no hay resultados todavía
+if not hits:
     st.info("Enter a question and click **Search**.")
+else:
+    # Mostrar hits (o cúbralos con 'hide_hits' si luego quieres ocultarlos)
+    for i, h in enumerate(hits, start=1):
+        with st.container(border=True):
+            cols = st.columns([1, 2])
+
+            # Imagen
+            img_path = resolve_image_path(h["image"], h["source"])
+            if img_path and img_path.exists():
+                cols[0].image(str(img_path), caption=f"Page {h['page']}")
+            else:
+                cols[0].write("❓ Could not find the image on disk.")
+
+            # Texto + metadatos
+            cols[1].markdown(
+                f"**#{i}** · **Score:** {h['score']:.3f} · "
+                f"**Source:** {h['source']} · **Page:** {h['page']}"
+            )
+            snippet = (h["text"] or "").strip().replace("\n", " ")
+            cols[1].write(snippet[:600] + ("…" if len(snippet) > 600 else ""))
+
+    st.divider()
+    st.subheader("✨ Generated answer")
+
+    # Botón independiente (NO depende de do_search)
+    gen_disabled = not bool(hits) or not bool(st.session_state.last_question.strip())
+    if st.button("✨ Generate answer from Top-K", disabled=gen_disabled):
+        cfg = GenConfig(
+            model=model_name,           # del selector del sidebar
+            temperature=temp,           # idem
+            max_tokens=int(max_tokens), # idem
+            k=k,
+            max_ctx_chars=6000,
+        )
+        with st.spinner("Generating answer…"):
+            out = answer_question(st.session_state.last_question, cfg)
+        st.session_state.last_answer = out["answer"]
+        st.session_state.last_used   = out["used"]
+
+    # Mostrar la última respuesta si existe
+    if st.session_state.last_answer:
+        st.markdown(st.session_state.last_answer)
+        st.caption(
+            "Sources: " + ", ".join(
+                f"{h['source']} p.{h['page']}" for h in st.session_state.last_used
+            )
+        )
