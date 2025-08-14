@@ -46,6 +46,8 @@ model_name = st.sidebar.selectbox(
 temp = st.sidebar.slider("Temperature", 0.0, 1.0, 0.2, 0.1)
 max_tokens = st.sidebar.number_input("Max tokens", 64, 2048, 300, 32)
 
+auto_generate = st.sidebar.checkbox("Auto-generate after search", value=False)
+hide_hits     = st.sidebar.checkbox("Hide hits (only final answer)", value=False)
 
 with st.sidebar.expander("Advanced (Optional)"):
     base_pdf_dir = Path(st.text_input("Base of PDFs (to find images)", "data/pdf"))
@@ -163,11 +165,11 @@ if use_img_query and uploaded is not None:
 
 # -------------- Execute query & show results --------------
 
-# Campo de búsqueda (usa el último valor si existe)
+# Campo de búsqueda (conserva última query)
 question = st.text_input(
     "Write your question...",
     value=st.session_state.last_question,
-    placeholder="e.g., azúcares añadidos y etiquetas",
+    placeholder="e.g., what is the composition of the sun?",
 )
 
 col_run, col_clear = st.columns([1, 1])
@@ -177,65 +179,81 @@ if col_clear.button("Clean results"):
     st.session_state.last_answer = None
     st.session_state.last_used = []
     st.session_state.last_question = ""
-    st.experimental_rerun()
+    st.rerun()
 
-# Si se pulsa Search, ejecuta retrieve y guarda EN SESIÓN
+# Ejecutar búsqueda si se pulsa Search
+just_searched = False
 if do_search and question.strip():
     with st.spinner("Searching ..."):
         hits = retrieve(question, k=k, image=query_image, alpha=alpha)
     st.session_state.hits = hits
     st.session_state.last_question = question
+    just_searched = True
 
-# A partir de aquí, SIEMPRE leemos hits desde sesión
 hits = st.session_state.hits
 
-# Si no hay resultados todavía
+# (Opcional) autogenerar inmediatamente tras la búsqueda
+if auto_generate and just_searched and hits:
+    cfg = GenConfig(
+        model=model_name,
+        temperature=temp,
+        max_tokens=int(max_tokens),
+        k=k,
+        max_ctx_chars=6000,
+    )
+    with st.spinner("Generating answer…"):
+        out = answer_question(st.session_state.last_question, cfg)
+    st.session_state.last_answer = out["answer"]
+    st.session_state.last_used   = out["used"]
+
+# Mostrar hits salvo que el usuario los oculte
 if not hits:
     st.info("Enter a question and click **Search**.")
 else:
-    # Mostrar hits (o cúbralos con 'hide_hits' si luego quieres ocultarlos)
-    for i, h in enumerate(hits, start=1):
-        with st.container(border=True):
-            cols = st.columns([1, 2])
+    if not hide_hits:
+        for i, h in enumerate(hits, start=1):
+            with st.container(border=True):
+                cols = st.columns([1, 2])
 
-            # Imagen
-            img_path = resolve_image_path(h["image"], h["source"])
-            if img_path and img_path.exists():
-                cols[0].image(str(img_path), caption=f"Page {h['page']}")
-            else:
-                cols[0].write("❓ Could not find the image on disk.")
+                # Imagen
+                img_path = resolve_image_path(h["image"], h["source"])
+                if img_path and img_path.exists():
+                    cols[0].image(str(img_path), caption=f"Page {h['page']}")
+                else:
+                    cols[0].write("❓ Could not find the image on disk.")
 
-            # Texto + metadatos
-            cols[1].markdown(
-                f"**#{i}** · **Score:** {h['score']:.3f} · "
-                f"**Source:** {h['source']} · **Page:** {h['page']}"
-            )
-            snippet = (h["text"] or "").strip().replace("\n", " ")
-            cols[1].write(snippet[:600] + ("…" if len(snippet) > 600 else ""))
+                # Texto + metadatos
+                cols[1].markdown(
+                    f"**#{i}** · **Score:** {h['score']:.3f} · "
+                    f"**Source:** {h['source']} · **Page:** {h['page']}"
+                )
+                snippet = (h["text"] or "").strip().replace("\n", " ")
+                cols[1].write(snippet[:600] + ("…" if len(snippet) > 600 else ""))
 
-    st.divider()
-    st.subheader("✨ Generated answer")
+# Sección de respuesta generada
+st.divider()
+st.subheader("✨ Generated answer")
 
-    # Botón independiente (NO depende de do_search)
-    gen_disabled = not bool(hits) or not bool(st.session_state.last_question.strip())
-    if st.button("✨ Generate answer from Top-K", disabled=gen_disabled):
-        cfg = GenConfig(
-            model=model_name,           # del selector del sidebar
-            temperature=temp,           # idem
-            max_tokens=int(max_tokens), # idem
-            k=k,
-            max_ctx_chars=6000,
+# Botón manual (si no usamos autogen; igualmente puedes regenerar)
+gen_disabled = not bool(hits) or not bool(st.session_state.last_question.strip())
+if st.button("✨ Generate answer from Top-K", disabled=gen_disabled):
+    cfg = GenConfig(
+        model=model_name,
+        temperature=temp,
+        max_tokens=int(max_tokens),
+        k=k,
+        max_ctx_chars=6000,
+    )
+    with st.spinner("Generating answer…"):
+        out = answer_question(st.session_state.last_question, cfg)
+    st.session_state.last_answer = out["answer"]
+    st.session_state.last_used   = out["used"]
+
+# Mostrar la última respuesta si existe
+if st.session_state.last_answer:
+    st.markdown(st.session_state.last_answer)
+    st.caption(
+        "Sources: " + ", ".join(
+            f"{h['source']} p.{h['page']}" for h in st.session_state.last_used
         )
-        with st.spinner("Generating answer…"):
-            out = answer_question(st.session_state.last_question, cfg)
-        st.session_state.last_answer = out["answer"]
-        st.session_state.last_used   = out["used"]
-
-    # Mostrar la última respuesta si existe
-    if st.session_state.last_answer:
-        st.markdown(st.session_state.last_answer)
-        st.caption(
-            "Sources: " + ", ".join(
-                f"{h['source']} p.{h['page']}" for h in st.session_state.last_used
-            )
-        )
+    )
