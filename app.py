@@ -11,6 +11,9 @@ from src.vector_store import VectorStore
 from src.retrieve import init_store, retrieve
 from src.generate import answer_question, GenConfig
 
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 warnings.filterwarnings(
     "ignore",
     message="These pretrained weigths were trained with QuickGELU activation",
@@ -59,8 +62,8 @@ with st.sidebar.expander("Advanced (Optional)"):
 # ---------- Cache the load of the index ----------
 @st.cache_resource(show_spinner=True)
 def load_store(dim_guess: int = 1536, index_path: Path = index_path, meta_path: Path = meta_path):
-    if not index_path.exists() or not meta_path.exists():
-        return None
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    meta_path.parent.mkdir(parents=True, exist_ok=True)
     store = VectorStore(dim_guess, index_path, meta_path)
     init_store(store)
     return store
@@ -104,12 +107,8 @@ def ingest_and_index_pdf(pdf_bytes: bytes, filename: str, base_dir: Path, *, dpi
 
 store = load_store()
 
-if store is None:
-    st.error(
-        "Index ot metadata base could not be found. "
-        "Make sure to have created `data/faiss.index` and `data/faiss.sqlite`."
-    )
-    st.stop()
+if store.index.ntotal == 0:
+    st.warning("The index is empty. Upload a PDF on the sidebar to ingest and index it.")
 
 st.success(f"Index loaded · dim={store.dim} · ntotal={store.index.ntotal}")
 
@@ -173,7 +172,8 @@ question = st.text_input(
 )
 
 col_run, col_clear = st.columns([1, 1])
-do_search = col_run.button("Search")
+search_disabled = (store.index.ntotal == 0)
+do_search = col_run.button("Search", disabled=search_disabled)
 if col_clear.button("Clean results"):
     st.session_state.hits = []
     st.session_state.last_answer = None
@@ -235,7 +235,7 @@ st.divider()
 st.subheader("✨ Generated answer")
 
 # Botón manual (si no usamos autogen; igualmente puedes regenerar)
-gen_disabled = not bool(hits) or not bool(st.session_state.last_question.strip())
+gen_disabled = (store.index.ntotal == 0) or not bool(hits) or not bool(st.session_state.last_question.strip())
 if st.button("✨ Generate answer from Top-K", disabled=gen_disabled):
     cfg = GenConfig(
         model=model_name,
