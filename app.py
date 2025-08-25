@@ -31,6 +31,8 @@ if "last_used" not in st.session_state:
     st.session_state.last_used = []   # sources used by the LLM
 if "last_question" not in st.session_state:
     st.session_state.last_question = ""
+if "chat_qa" not in st.session_state:
+    st.session_state.chat_qa = []
 
 
 # ---------- Sidebar: paths and options ----------
@@ -202,9 +204,17 @@ if auto_generate and just_searched and hits:
         max_ctx_chars=6000,
     )
     with st.spinner("Generating answer…"):
-        out = answer_question(st.session_state.last_question, cfg)
+        out = answer_question(st.session_state.last_question,
+                              cfg,
+                              history_qa= st.session_state.chat_qa,
+                              prev_hits= st.session_state.last_used)
     st.session_state.last_answer = out["answer"]
     st.session_state.last_used   = out["used"]
+
+    st.session_state.chat_qa.append(
+        (out.get("rewritten_question", st.session_state.last_question),
+         st.session_state.last_answer)
+    )
 
 # Mostrar hits salvo que el usuario los oculte
 if not hits:
@@ -245,9 +255,17 @@ if st.button("✨ Generate answer from Top-K", disabled=gen_disabled):
         max_ctx_chars=6000,
     )
     with st.spinner("Generating answer…"):
-        out = answer_question(st.session_state.last_question, cfg)
+        out = answer_question(st.session_state.last_question,
+                              cfg,
+                              history_qa= st.session_state.chat_qa,
+                              prev_hits= st.session_state.last_used)
     st.session_state.last_answer = out["answer"]
     st.session_state.last_used   = out["used"]
+
+    st.session_state.chat_qa.append(
+        (out.get("rewritten_question", st.session_state.last_question),
+         st.session_state.last_answer)
+    )
 
 # Mostrar la última respuesta si existe
 if st.session_state.last_answer:
@@ -257,3 +275,11 @@ if st.session_state.last_answer:
             f"{h['source']} p.{h['page']}" for h in st.session_state.last_used
         )
     )
+
+if st.sidebar.button("🧹 New conversation"):
+    st.session_state.chat_qa = []
+    st.session_state.last_answer = None
+    st.session_state.last_used = []
+    st.session_state.hits = []
+    st.session_state.last_question = ""
+    st.rerun()

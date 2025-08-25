@@ -134,43 +134,86 @@ def _call_ollama_chat(system: str, user: str, *, model: str, temperature: float,
     return data.get("message", {}).get("content", "")
 
 # ───────── Main API ─────────
-def answer_question(question: str, cfg: Optional[GenConfig] = None) -> Dict[str, Any]:
+def answer_question(question: str, cfg: Optional[GenConfig] = None, history_qa: list[tuple[str, str]] | None = None, prev_hits: list[dict] | None = None) -> Dict[str, Any]:
     """
     Orchestrator: retrieve -> context -> prompt -> LLM.
     Returns: {'answer': str, 'used': [hits, used], 'all_hits': [topK], 'latency_ms': float}
     """
     cfg = cfg or GenConfig()
+    history_qa = history_qa or []
+    prev_hits = prev_hits or []
+
+    try:
+        if history_qa:
+            question_rw = rewrite_question(question, history_qa, model=cfg.model)
+        else:
+            question_rw = question
+    except Exception:
+            question_rw = question
+    
 
     t0 = time.perf_counter()
-    all_hits = retrieve(question, k=cfg.k) # uses retrieve.py
-    if not all_hits:
-        return {
-            "answer": "I don't know. Please provide me with more information and details.",
-            "used": [],
-            "all_hits": [],
-            "latency_ms": 1000 * (time.perf_counter() - t0)
-        }
-    
-    # (optional) filter very weak hits
-    all_hits = [h for h in all_hits if h["score"] >= 0.15] or all_hits[:1]
+    all_hits = retrieve(question_rw, k=cfg.k)
 
-    context, used_hits = _build_context(all_hits, cfg.max_ctx_chars)
-    prompt = _make_prompt(question, context)
-    system_msg, user_msg = _build_messages(question, context)
 
-    # LLM
-    llm_out = _call_ollama_chat(
-        system_msg,
-        user_msg,
-        model=cfg.model,
-        temperature=cfg.temperature,
-        max_tokens=cfg.max_tokens,
-    )
+    seed = prev_hits[:2]  # como mucho 1-2 del turno previo
+   
+    seen = set()
+    merged = []
+    for h in seed + all_hits:
+        key = (h["source"], h["page"])
+        if key in seen: 
+            continue
+        seen.add(key)
+        merged.append(h)
+
+    context, used_hits = _build_context(merged, cfg.max_ctx_chars)
+    system_msg, user_msg = _build_messages(question_rw, context)
+
+    llm_out = _call_ollama_chat(system_msg, user_msg,
+                                model=cfg.model,
+                                temperature=cfg.temperature,
+                                max_tokens=cfg.max_tokens)
     t1 = time.perf_counter()
 
     return {
         "answer": llm_out.strip(),
         "used": used_hits,
         "all_hits": all_hits,
-        "latency_ms": round(1000 * (t1 - t0), 1),
+        "latency_ms": round(1000*(t1-t0), 1),
+        "rewritten_question": question_rw,
     }
+
+def rewrite_question(followup: str, history_qa: list[tuple[str, str]], *, model: str) -> str:
+    """
+    Converts a followup question into an autonomous question,
+    using last 2-3 pairs (Q, A) as a brief context
+    """
+    import requests, textwrap
+    url = "http://127.0.0.1:11434/api/chat"
+
+    hist_txt = "\n".join([f"Q: {q}\nA: {a}" for q, a in history_qa[-3:]])
+    system = (
+        "Rerwite the user's followup into a sntandalone quesiton, "
+        "keeping the original intent and specifics. Output ONLY the rewritten question."
+    )
+
+    user = textwrap.dedent(f"""\
+            Converstaion (most recent last):
+            {hist_txt}
+
+            Follow-up: {followup}
+            Standalone question:""")
+    
+    r = requests.post(url, json={
+        "model": model,
+        "stream": False,
+        "messages": [
+            {"role":"system", "content": system},
+            {"role":"user", "content": user}
+        ]
+    }, timeout=60)
+    r.raise_for_status()
+    text = r.json().get("message", {}).get("content", "").strip()
+
+    return text.splitlines()[0].strip().strip('"')
